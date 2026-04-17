@@ -404,9 +404,9 @@ Além disso, incluí uma **guia de personas por tipo de bug** — não como tabe
 
 **Como apliquei:** 13 exemplos rotulados A–M, distribuídos por nível e padrão de seção:
 
-- **Exemplos A–E (Nível 1):** carrinho, email, iOS, Safari, dashboard — demonstram o formato mínimo sem qualquer seção extra; cada um corresponde diretamente a um bug simples do dataset
-- **Exemplos F–L (Nível 2):** webhook, relatório SQL, segurança OWASP, z-index mobile, pipeline de desconto, Android ANR, race condition de estoque — cada um demonstra um tipo diferente de seção contextual (`Contexto Técnico`, `Contexto de Segurança`, `Critérios Técnicos`, `Critérios de Prevenção`, `Exemplo de Cálculo`, `Critérios Adicionais para Admins`)
-- **Exemplo M (Nível 3):** checkout com XSS + gateway timeout + race condition + loading infinito — demonstra o formato `=== SEÇÕES ===` com grupos A/B/C/D, critérios técnicos agrupados por área e tasks organizadas por categoria
+- **Exemplos (Nível 1):** carrinho, email, iOS, Safari, dashboard — demonstram o formato mínimo sem qualquer seção extra; cada um corresponde diretamente a um bug simples do dataset
+- **Exemplos (Nível 2):** webhook, relatório SQL, segurança OWASP, z-index mobile, pipeline de desconto, Android ANR, race condition de estoque — cada um demonstra um tipo diferente de seção contextual (`Contexto Técnico`, `Contexto de Segurança`, `Critérios Técnicos`, `Critérios de Prevenção`, `Exemplo de Cálculo`, `Critérios Adicionais para Admins`)
+- **Exemplos (Nível 3):** checkout com XSS + gateway timeout + race condition + loading infinito — demonstra o formato `=== SEÇÕES ===` com grupos A/B/C/D, critérios técnicos agrupados por área e tasks organizadas por categoria
 
 Uma lição importante descoberta durante a iteração: **regras que proíbem palavras específicas interferem com os exemplos**. Versões anteriores tinham uma lista "PROIBIDO: corretamente, adequadamente, funcionar bem" — mas o dataset de referência usa essas palavras em contextos legítimos. O modelo passava a evitá-las mesmo nos outputs de referência, gerando variações que caíam no F1. A solução foi substituir as proibições por uma instrução positiva: "siga exatamente o nível de especificidade demonstrado nos exemplos."
 
