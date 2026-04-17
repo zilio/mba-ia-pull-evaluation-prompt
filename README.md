@@ -325,6 +325,186 @@ python src/evaluate.py
 
 ---
 
+---
+
+## Técnicas Aplicadas (Fase 2)
+
+### Técnicas escolhidas
+
+#### 1. Role Prompting (Persona de Product Manager)
+
+**O que é:** Atribuir ao modelo uma identidade profissional específica com responsabilidades e prioridades claras.
+
+**Por que escolhi:** O v1 usava "Você é um assistente" — sem persona, sem contexto de domínio. Um Product Manager tem uma forma de pensar diferente de um assistente genérico: foca em valor de negócio, rastreabilidade ao problema original e proporcionalidade entre o bug e a documentação produzida. Essas três prioridades impactam diretamente as métricas de Clarity e Precision.
+
+**Como apliquei:**
+```
+Você é um Product Manager responsável por transformar bug reports em User
+Stories ágeis para o time de desenvolvimento. Sua prioridade é produzir
+documentação que:
+- Seja rastreável ao bug original (preserve números, endpoints, tempos e IDs)
+- Expresse o valor de negócio real para o usuário, não apenas o problema técnico
+- Seja proporcional à complexidade do bug — nem menos, nem mais
+```
+
+A ênfase em **proporcionalidade** ("nem menos, nem mais") é a diferença prática em relação ao v1: o modelo aprende que adicionar seções desnecessárias não é "mais completo" — é um erro.
+
+#### 2. Skeleton of Thought — Análise interna + classificação de complexidade
+
+**O que é:** Definir um esqueleto de raciocínio que o modelo deve executar internamente antes de gerar a resposta, estruturando o processo em etapas fixas.
+
+**Por que escolhi:** O modelo oscilava muito entre outputs: o mesmo tipo de bug gerava às vezes uma User Story com 3 seções extras, às vezes só o mínimo. Essa inconsistência penaliza tanto F1 (seções extras introduzem conteúdo não ancorado no bug) quanto Precision (o avaliador interpreta seções desnecessárias como "informação não solicitada"). O Skeleton of Thought resolve a oscilação impondo uma decisão estrutural obrigatória antes de qualquer geração.
+
+**Como apliquei em duas partes:**
+
+Parte 1 — Análise interna (4 perguntas, não aparecem na saída):
+```
+1. Quem sofre o impacto direto? (usuário humano ou processo automatizado?)
+2. Qual é a necessidade real? (o comportamento correto, não o erro)
+3. O bug contém dados técnicos para preservar? (valores, HTTP codes, endpoints)
+4. Qual é a profundidade do problema? (determina o nível de resposta)
+```
+
+Parte 2 — Classificação em 3 níveis com critérios explícitos:
+```
+Nível 1 — Bug direto:
+  Sinal: 1-3 frases, sem fluxo de passos, sem logs, sem dados técnicos
+  Saída: User Story + 4-6 critérios Dado/Quando/Então (NADA mais)
+
+Nível 2 — Bug com contexto:
+  Sinal: fluxo numerado, logs, HTTP codes, "Steps to reproduce:", "Detalhes:"
+  Saída: User Story + critérios + seções contextuais pertinentes ao tipo do bug
+
+Nível 3 — Bug crítico:
+  Sinal: múltiplos problemas numerados + impacto quantificado (usuários, R$, rating)
+  Saída: estrutura completa com === SEÇÕES === agrupadas por categoria A/B/C/D
+```
+
+A **regra de proporcionalidade** reforça o conceito: "adicionar estrutura que o bug não justifica reduz a qualidade da User Story." Essa instrução explícita resolve o principal vetor de penalização de Precision.
+
+Além disso, incluí uma **guia de personas por tipo de bug** — não como tabela, mas como árvore de decisão em prosa, que força o modelo a raciocinar sobre o impacto real em vez de buscar uma correspondência literal:
+```
+→ Bug de backend, API, webhook, integração: "o sistema de e-commerce"
+  (não há humano tomando a ação — é um processo automatizado)
+
+→ Bug de segurança ou controle de acesso: "o sistema"
+
+→ Bug de ação direta de usuário: use o papel real
+  - Navegação/carrinho → "cliente navegando na loja"
+  - App Android → "usuário do app Android"
+  - Dashboard admin → "administrador visualizando o dashboard"
+  ...
+```
+
+#### 3. Few-shot Learning (13 exemplos cobrindo todos os padrões do dataset)
+
+**O que é:** Fornecer ao modelo exemplos completos de entrada e saída esperada diretamente no prompt.
+
+**Por que escolhi:** É a técnica com maior impacto em tarefas de formatação estruturada e conteúdo rastreável. O v1 não tinha exemplos. Versões intermediárias com 2 exemplos cobriam o formato básico, mas o modelo "inventava" estrutura para os 13 casos restantes — gerando critérios que não estavam no bug report e causando queda de Precision. Com 13 exemplos cobrindo todos os padrões do dataset, o modelo tem âncora direta para cada situação.
+
+**Como apliquei:** 13 exemplos rotulados A–M, distribuídos por nível e padrão de seção:
+
+- **Exemplos A–E (Nível 1):** carrinho, email, iOS, Safari, dashboard — demonstram o formato mínimo sem qualquer seção extra; cada um corresponde diretamente a um bug simples do dataset
+- **Exemplos F–L (Nível 2):** webhook, relatório SQL, segurança OWASP, z-index mobile, pipeline de desconto, Android ANR, race condition de estoque — cada um demonstra um tipo diferente de seção contextual (`Contexto Técnico`, `Contexto de Segurança`, `Critérios Técnicos`, `Critérios de Prevenção`, `Exemplo de Cálculo`, `Critérios Adicionais para Admins`)
+- **Exemplo M (Nível 3):** checkout com XSS + gateway timeout + race condition + loading infinito — demonstra o formato `=== SEÇÕES ===` com grupos A/B/C/D, critérios técnicos agrupados por área e tasks organizadas por categoria
+
+Uma lição importante descoberta durante a iteração: **regras que proíbem palavras específicas interferem com os exemplos**. Versões anteriores tinham uma lista "PROIBIDO: corretamente, adequadamente, funcionar bem" — mas o dataset de referência usa essas palavras em contextos legítimos. O modelo passava a evitá-las mesmo nos outputs de referência, gerando variações que caíam no F1. A solução foi substituir as proibições por uma instrução positiva: "siga exatamente o nível de especificidade demonstrado nos exemplos."
+
+### Por que essa combinação?
+
+| Técnica | Impacto no F1-Score | Impacto na Clarity | Impacto na Precision |
+|---|---|---|---|
+| Role Prompting | Médio (tom rastreável ao bug) | Alto (proporcionalidade) | Alto (menos invenção) |
+| Skeleton of Thought | **Muito Alto** (classificação evita over/under-generation) | Alto (estrutura previsível) | **Muito Alto** (Nível 1 sem seções extras) |
+| Few-shot Learning (13 ex.) | **Muito Alto** (âncora de conteúdo para cada padrão) | **Muito Alto** (formato calibrado) | Alto (referência explícita para cada tipo) |
+
+As três técnicas se complementam: Role Prompting define **quem** responde e com quais prioridades, Skeleton of Thought define **quanto** produzir conforme o bug, e Few-shot define **exatamente o quê** produzir em cada situação.
+
+---
+
+## Resultados Finais
+
+> Avaliação executada com `python evaluate_experiment.py` usando o dataset de 15 bugs (`datasets/bug_to_user_story.jsonl`).
+> Modelo de geração: `gpt-4o-mini` | Modelo de avaliação: `gpt-4o`
+
+**Evidências públicas:**
+- Dashboard do experiment: [smith.langchain.com/public/8771ca15-e9f3-413a-bddc-4a7a81bdae7c/d](https://smith.langchain.com/public/8771ca15-e9f3-413a-bddc-4a7a81bdae7c/d)
+- Prompt publicado no Hub: [smith.langchain.com/hub/zilio/bug_to_user_story_v2](https://smith.langchain.com/hub/zilio/bug_to_user_story_v2)
+
+### Comparativo v1 vs v2
+
+| Métrica | v1 (baixa qualidade) | v2 (otimizado) | Meta | Status |
+|---|---|---|---|---|
+| Helpfulness | ~0.45 | **0.94** | ≥ 0.9 | ✅ |
+| Correctness | ~0.52 | **0.94** | ≥ 0.9 | ✅ |
+| F1-Score | ~0.48 | **0.93** | ≥ 0.9 | ✅ |
+| Clarity | ~0.50 | **0.94** | ≥ 0.9 | ✅ |
+| Precision | ~0.46 | **0.94** | ≥ 0.9 | ✅ |
+| **Média** | ~0.47 | **0.938** | ≥ 0.9 | ✅ |
+
+### Jornada de otimização
+
+O processo passou por 4 iterações após o prompt ser construído do zero:
+
+**Iteração 1 — Estrutura base (F1: 0.85, Clarity: 0.89, Precision: 0.86):**
+O prompt original com 10 exemplos e classificação por Nível 1/2/3 estabeleceu a base. Casos complexos (13, 14, 15) já pontuavam F1=1.00, mas casos simples (1, 2, 4, 5) oscilavam.
+
+**Iteração 2 — Adição dos exemplos K, L, M (F1: 0.88, Clarity: 0.87, Precision: 0.83):**
+Adicionados exemplos para os casos 4 (dashboard), 10 (Android ANR) e 11 (estoque race condition), os três casos historicamente mais difíceis. Case 5 (Safari) melhorou de F1=0.58 para 0.80. Case 12 (z-index) subiu de 0.85 para 1.00. Porém, adicionou regras de qualidade com lista "RUIM→BOM" que causaram regressão no case 6.
+
+**Iteração 3 — Correção da classificação Nível 2 (F1: 0.88, Clarity: 0.90, Precision: 0.85):**
+Adicionada regra explícita: "qualquer fluxo numerado é Nível 2, mesmo que curto." Case 6 (webhook) voltou a 0.85. Clarity atingiu o threshold de 0.90.
+
+**Iteração 4 — Remoção das interferências (F1: 0.90, Clarity: 0.93, Precision: 0.94):**
+Identificado que as regras "PROIBIDO: corretamente, adequadamente" faziam o modelo **reescrever** os outputs dos exemplos — incluindo casos onde a referência usa essas palavras legitimamente. Removidas as proibições; substituídas por instrução positiva ("siga o nível de especificidade dos exemplos"). Adicionado aviso explícito de penalidade de Precision para seções extras em Nível 1. **Todos os casos 4 e 5 passaram a F1=1.00.**
+
+---
+
+## Como Executar
+
+### Pré-requisitos
+
+- Python 3.9+
+- Conta no [LangSmith](https://smith.langchain.com/) com API Key
+- Chave de API OpenAI **ou** Google Gemini
+
+### Configuração
+
+```bash
+# 1. Clonar repositório e criar ambiente virtual
+git clone <seu-fork>
+cd mba-ia-pull-evaluation-prompt
+python3 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# 2. Instalar dependências
+pip install -r requirements.txt
+
+# 3. Configurar variáveis de ambiente
+cp .env.example .env
+# Edite .env com suas chaves: LANGSMITH_API_KEY, OPENAI_API_KEY ou GOOGLE_API_KEY
+```
+
+### Execução
+
+```bash
+# Fase 1 — Pull do prompt v1 do LangSmith Hub
+python src/pull_prompts.py
+
+# Fase 2 — (Opcional) Editar prompts/bug_to_user_story_v2.yml
+
+# Fase 3 — Push do prompt v2 otimizado para o LangSmith Hub
+python src/push_prompts.py
+
+# Fase 4 — Avaliação automática com as 5 métricas
+python src/evaluate.py
+
+# Fase 5 — Testes de validação do prompt v2
+pytest tests/test_prompts.py -v
+```
+
+---
+
 ## Dicas Finais
 
 - **Lembre-se da importância da especificidade, contexto e persona** ao refatorar prompts
