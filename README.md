@@ -497,7 +497,7 @@ python src/pull_prompts.py
 python src/push_prompts.py
 
 # Fase 4 — Avaliação automática com as 5 métricas
-python src/evaluate.py
+python src/evaluate_experiment.py
 
 # Fase 5 — Testes de validação do prompt v2
 pytest tests/test_prompts.py -v
